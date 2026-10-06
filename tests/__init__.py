@@ -1,0 +1,1 @@
+"""ZeroSpinner test package."""
