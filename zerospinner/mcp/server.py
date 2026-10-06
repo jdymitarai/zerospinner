@@ -97,6 +97,36 @@ class ZeroSpinnerMCPService:
             "subagents_terminated": len(self.breaker.subagents),
         }
 
+    def teardown(self, stop_cloud: bool = True, reason: str = "Teardown requested") -> Dict[str, Any]:
+        """Tear down all background processes and optionally stop cloud VMs."""
+        if self.watchdog is not None:
+            self.watchdog.stop()
+        subagents_killed = self.breaker.terminate_subagents()
+        cloud_report = {}
+        if stop_cloud:
+            try:
+                import subprocess
+                import sys
+                from pathlib import Path
+
+                dispatch_py = Path("c:/ai/dispatch.py")
+                if dispatch_py.exists():
+                    res = subprocess.run(
+                        [sys.executable, str(dispatch_py), "--stop"],
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+                    cloud_report = {"output": res.stdout.strip()[:200]}
+            except Exception as e:
+                cloud_report = {"error": str(e)}
+        return {
+            "status": "teardown_complete",
+            "reason": reason,
+            "subagents_killed": subagents_killed,
+            "cloud_teardown": cloud_report,
+        }
+
 
 # Global singleton instance for MCP server execution
 _SERVICE = ZeroSpinnerMCPService()
@@ -131,6 +161,12 @@ def handle_trip_breaker(reason: str = "MANUAL_OVERRIDE") -> str:
     return json.dumps(result, indent=2)
 
 
+def handle_teardown(stop_cloud: bool = True, reason: str = "Teardown requested") -> str:
+    """Tool handler: zerospinner_teardown."""
+    result = _SERVICE.teardown(stop_cloud=stop_cloud, reason=reason)
+    return json.dumps(result, indent=2)
+
+
 def create_mcp_server():
     """Create FastMCP server instance if mcp library is available."""
     try:
@@ -157,6 +193,11 @@ def create_mcp_server():
         def zerospinner_trip_breaker(reason: str = "MANUAL_OVERRIDE") -> str:
             """Immediately trip the circuit breaker, stopping infinite spinner and speculative subagent loops."""
             return handle_trip_breaker(reason)
+
+        @mcp.tool()
+        def zerospinner_teardown(stop_cloud: bool = True, reason: str = "Teardown requested") -> str:
+            """Tear down all background processes, release cloud compute resources, and clean up completely."""
+            return handle_teardown(stop_cloud=stop_cloud, reason=reason)
 
         return mcp
     except ImportError:

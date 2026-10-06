@@ -12,7 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Union
 
-from zerospinner.core.milestone import MilestoneDetector
+from zerospinner.core.milestone import (
+    MilestoneDetector,
+    MilestoneEvent,
+    MILESTONE_PR_CREATED,
+)
 
 
 @dataclass
@@ -99,6 +103,21 @@ class TranscriptWatchdog:
         self._alerts: List[WatchdogAlert] = []
         self._alert_callbacks: List[Callable[[WatchdogAlert], None]] = []
         self._telemetry_callbacks: List[Callable[[WatchdogTelemetry], None]] = []
+        self._completion_callbacks: List[Callable[[MilestoneEvent], None]] = []
+
+        # Wire milestone detector for completion and delivery events
+        self.detector.on_milestone(self._handle_milestone_completion)
+
+    def _handle_milestone_completion(self, event: MilestoneEvent) -> None:
+        """Propagate delivery milestone events to completion callbacks."""
+        if event.milestone_type in (MILESTONE_PR_CREATED,):
+            with self._lock:
+                callbacks = list(self._completion_callbacks)
+            for cb in callbacks:
+                try:
+                    cb(event)
+                except Exception:
+                    pass
 
     def on_alert(self, callback: Callable[[WatchdogAlert], None]) -> None:
         """Register a callback for watchdog alerts."""
@@ -109,6 +128,11 @@ class TranscriptWatchdog:
         """Register a callback for telemetry updates."""
         with self._lock:
             self._telemetry_callbacks.append(callback)
+
+    def on_completion(self, callback: Callable[[MilestoneEvent], None]) -> None:
+        """Register a callback for delivery milestones (e.g. PR created) to trigger auto-teardown."""
+        with self._lock:
+            self._completion_callbacks.append(callback)
 
     def start(self) -> None:
         """Start the watchdog background thread."""
@@ -360,3 +384,14 @@ class TranscriptWatchdog:
                 cb(telem)
             except Exception:
                 pass
+
+
+# Canonical alias for watchdog
+ZeroSpinnerWatchdog = TranscriptWatchdog
+
+__all__ = [
+    "TranscriptWatchdog",
+    "ZeroSpinnerWatchdog",
+    "WatchdogAlert",
+    "WatchdogTelemetry",
+]
