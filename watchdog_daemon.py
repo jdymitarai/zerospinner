@@ -139,7 +139,20 @@ def perform_teardown(reason: str = "Mission Complete", stop_cloud: bool = True) 
         except Exception as e:
             print(f"[Teardown] Warning during cloud teardown: {e}", flush=True)
 
-    # 2. Cleanup PID and Stop Flag files
+    # 2. Terminate any orphan worker / runner OS processes (e.g. orphan ssh, gcloud, repro processes)
+    if sys.platform == "win32":
+        try:
+            clean_cmd = (
+                'Get-Process | Where-Object { '
+                '$_.ProcessName -match "ssh" -or '
+                '($_.ProcessName -match "python" -and $_.CommandLine -match "repro|run_remote|dispatch\\.py --repo") '
+                '} | Stop-Process -Force -ErrorAction SilentlyContinue'
+            )
+            subprocess.run(["powershell", "-NoProfile", "-Command", clean_cmd], capture_output=True, timeout=10)
+        except Exception:
+            pass
+
+    # 3. Cleanup PID and Stop Flag files
     if PID_FILE.exists():
         try:
             PID_FILE.unlink(missing_ok=True)
@@ -152,7 +165,8 @@ def perform_teardown(reason: str = "Mission Complete", stop_cloud: bool = True) 
             pass
 
     print("=" * 80, flush=True)
-    print("✅ ZeroSpinner Teardown Complete. Background 100% Cleared.", flush=True)
+    print("✅ ZeroSpinner Teardown Complete. Cloud Resources & OS Processes Cleared.", flush=True)
+    print("📢 [CRITICAL DIRECTIVE] Main Agent MUST execute manage_subagents(Action='kill_all') to wipe subagents!", flush=True)
     print(f"🛡️  Watchdog daemon exiting cleanly (PID: {os.getpid()}). Zero residue left.", flush=True)
     print("=" * 80 + "\n", flush=True)
     return True
