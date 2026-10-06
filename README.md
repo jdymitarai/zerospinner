@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-blue.svg)](https://pypi.org/project/zerospinner/)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests Passing](https://img.shields.io/badge/tests-36%20passed%20%7C%20100%25-brightgreen)](https://github.com/google/zerospinner)
+[![Tests Passing](https://img.shields.io/badge/tests-36%20passed%20%7C%20100%25-brightgreen)](https://github.com/jdymitarai/zerospinner)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Standard%20Ready-purple)](https://modelcontextprotocol.io/)
 
 > **The Preemptive Kernel & Circuit Breaker for Autonomous AI Agents.**  
@@ -23,7 +23,7 @@ Modern autonomous AI coding agents (Claude Code, Antigravity, Devin, LangGraph, 
 
 ---
 
-## ⚡ Key Capabilities
+## �?Key Capabilities
 
 - 🎯 **Preemptive Milestone Engine**: Scans stdout streams and JSONL transcripts using high-speed heuristics for key milestones (`MILESTONE_TESTS_PASSED`, `MILESTONE_PR_CREATED`, `MILESTONE_BUILD_SUCCESS`, `MILESTONE_COMMIT_PUSHED`). Dispatches immediate notifications without waiting for the full multi-turn cycle to complete.
 - 🛑 **Anti-Matryoshka Circuit Breaker**: Enforces strict subagent nesting depth (`max_depth`), token limits, and time budgets. When a core milestone is reached, speculative secondary polishers are intercepted immediately (`TRIP_STOP_AND_DELIVER`) with auto-termination of child processes.
@@ -33,7 +33,7 @@ Modern autonomous AI coding agents (Claude Code, Antigravity, Devin, LangGraph, 
 
 ---
 
-## 🏛️ Architecture
+## 🏛�?Architecture
 
 ```mermaid
 flowchart TD
@@ -67,7 +67,7 @@ flowchart TD
 
 ```bash
 # Clone and install in editable mode
-git clone https://github.com/google/zerospinner.git
+git clone https://github.com/jdymitarai/zerospinner.git
 cd zerospinner
 pip install -e .
 
@@ -159,7 +159,7 @@ breaker = CircuitBreaker(
 detector.on_milestone(breaker.record_milestone)
 
 # 2. Fast-Path Preemptive Notification Callback
-detector.on_milestone(lambda event: print(f"⚡ FAST-PATH ALERT: {event.milestone_type}"))
+detector.on_milestone(lambda event: print(f"�?FAST-PATH ALERT: {event.milestone_type}"))
 
 # 3. Supervise Subagent Spawns
 allowed, err = breaker.register_subagent(
