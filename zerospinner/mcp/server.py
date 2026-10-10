@@ -168,40 +168,79 @@ def handle_teardown(stop_cloud: bool = True, reason: str = "Teardown requested")
 
 
 def create_mcp_server():
-    """Create FastMCP server instance if mcp library is available."""
+    """Create MCP server instance supporting both modern mcp 2.x MCPServer and legacy FastMCP."""
     try:
-        from mcp.server.fastmcp import FastMCP
+        try:
+            from mcp.server.mcpserver import MCPServer
+            mcp = MCPServer("ZeroSpinner")
+            is_v2 = True
+        except ImportError:
+            from mcp.server.fastmcp import FastMCP
+            mcp = FastMCP("ZeroSpinner", dependencies=["zerospinner", "rich"])
+            is_v2 = False
 
-        mcp = FastMCP("ZeroSpinner", dependencies=["zerospinner", "rich"])
+        # Try importing ToolAnnotations for M8ven hints
+        try:
+            from mcp.types import ToolAnnotations
+        except ImportError:
+            ToolAnnotations = None
 
-        @mcp.tool()
+        def _ann(read_only: bool, destructive: bool, idempotent: bool, open_world: bool):
+            if ToolAnnotations is not None:
+                try:
+                    return ToolAnnotations(
+                        readOnlyHint=read_only,
+                        destructiveHint=destructive,
+                        idempotentHint=idempotent,
+                        openWorldHint=open_world,
+                    )
+                except Exception:
+                    pass
+            return None
+
+        # 1. zerospinner_watch_session
+        ann1 = _ann(read_only=False, destructive=False, idempotent=True, open_world=False)
+        kw1 = {"annotations": ann1} if ann1 and is_v2 else {}
+        @mcp.tool(**kw1)
         def zerospinner_watch_session(transcript_path: str, poll_interval: float = 2.0) -> str:
             """Attach ZeroSpinner watchdog to an active agent transcript file to monitor stalls and loops."""
             return handle_watch_session(transcript_path, poll_interval)
 
-        @mcp.tool()
+        # 2. zerospinner_emit_milestone
+        ann2 = _ann(read_only=False, destructive=False, idempotent=False, open_world=False)
+        kw2 = {"annotations": ann2} if ann2 and is_v2 else {}
+        @mcp.tool(**kw2)
         def zerospinner_emit_milestone(type: str, payload: str = "", source: str = "agent") -> str:
             """Preemptively emit a milestone (e.g. MILESTONE_TESTS_PASSED, MILESTONE_PR_CREATED) to trigger fast delivery."""
             return handle_emit_milestone(type, payload, source)
 
-        @mcp.tool()
+        # 3. zerospinner_status
+        ann3 = _ann(read_only=True, destructive=False, idempotent=True, open_world=False)
+        kw3 = {"annotations": ann3} if ann3 and is_v2 else {}
+        @mcp.tool(**kw3)
         def zerospinner_status() -> str:
             """Query real-time ZeroSpinner status: circuit breaker state, telemetry, and subagent hierarchy."""
             return handle_status()
 
-        @mcp.tool()
+        # 4. zerospinner_trip_breaker
+        ann4 = _ann(read_only=False, destructive=True, idempotent=True, open_world=False)
+        kw4 = {"annotations": ann4} if ann4 and is_v2 else {}
+        @mcp.tool(**kw4)
         def zerospinner_trip_breaker(reason: str = "MANUAL_OVERRIDE") -> str:
             """Immediately trip the circuit breaker, stopping infinite spinner and speculative subagent loops."""
             return handle_trip_breaker(reason)
 
-        @mcp.tool()
+        # 5. zerospinner_teardown
+        ann5 = _ann(read_only=False, destructive=True, idempotent=True, open_world=False)
+        kw5 = {"annotations": ann5} if ann5 and is_v2 else {}
+        @mcp.tool(**kw5)
         def zerospinner_teardown(stop_cloud: bool = True, reason: str = "Teardown requested") -> str:
             """Tear down all background processes, release cloud compute resources, and clean up completely."""
             return handle_teardown(stop_cloud=stop_cloud, reason=reason)
 
         return mcp
     except ImportError:
-        logger.warning("mcp package is not installed; FastMCP server cannot be initialized.")
+        logger.warning("mcp package is not installed; MCP server cannot be initialized.")
         return None
 
 

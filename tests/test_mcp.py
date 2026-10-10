@@ -70,3 +70,45 @@ def test_fastmcp_registration():
     server = create_mcp_server()
     assert server is not None
     assert server.name == "ZeroSpinner"
+
+
+def test_zerospinner_watch_session(temp_transcript: Path):
+    """Dedicated test for zerospinner_watch_session MCP tool."""
+    raw = handle_watch_session(str(temp_transcript), poll_interval=1.0)
+    data = json.loads(raw)
+    assert data["status"] == "watching"
+    assert data["transcript_path"] == str(temp_transcript)
+
+
+def test_zerospinner_emit_milestone():
+    """Dedicated test for zerospinner_emit_milestone MCP tool."""
+    raw = handle_emit_milestone(type=MILESTONE_TESTS_PASSED, payload="10 passed")
+    data = json.loads(raw)
+    assert data["status"] == "emitted"
+    assert data["milestone"]["milestone_type"] == MILESTONE_TESTS_PASSED
+
+
+def test_zerospinner_status():
+    """Dedicated test for zerospinner_status MCP tool."""
+    raw = handle_status()
+    data = json.loads(raw)
+    assert "breaker" in data
+    assert "active_milestones" in data
+
+
+def test_zerospinner_trip_breaker():
+    """Dedicated test for zerospinner_trip_breaker MCP tool."""
+    raw = handle_trip_breaker(reason="TEST_TRIP")
+    data = json.loads(raw)
+    assert data["status"] == "tripped"
+    assert data["trip_reason"] == "TEST_TRIP"
+
+
+def test_zerospinner_teardown():
+    """Dedicated test for zerospinner_teardown MCP tool."""
+    from zerospinner.mcp.server import handle_teardown
+    raw = handle_teardown(stop_cloud=False, reason="Test teardown")
+    data = json.loads(raw)
+    assert data["status"] == "teardown_complete"
+    assert data["reason"] == "Test teardown"
+

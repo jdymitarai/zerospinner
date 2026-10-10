@@ -114,3 +114,21 @@ def test_partial_lines_buffering(temp_transcript: Path):
     read2 = watchdog.step()
     assert read2 == 1
     assert watchdog.get_telemetry().lines_read == 1
+
+
+def test_watchdog_periodic_report():
+    reports = []
+    watchdog = TranscriptWatchdog(report_interval_sec=0.05)
+    watchdog.on_periodic_report(lambda telem: reports.append(telem))
+
+    watchdog.feed_entry({"role": "user", "content": "Hello"})
+    time.sleep(0.08)
+    watchdog.check_health()
+
+    assert len(reports) >= 1
+    report = reports[0]
+    assert report.lines_read == 1
+    assert report.uptime_sec > 0
+    assert "lines_per_min" in report.to_dict()
+    assert "tokens_saved_estimate" in report.to_dict()
+

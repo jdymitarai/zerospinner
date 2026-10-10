@@ -50,6 +50,10 @@ class WatchdogTelemetry:
     is_looping: bool = False
     active_tool: Optional[str] = None
     alerts_count: int = 0
+    uptime_sec: float = 0.0
+    lines_per_min: float = 0.0
+    tokens_saved_estimate: int = 0
+    dollars_saved_estimate: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -62,6 +66,10 @@ class WatchdogTelemetry:
             "is_looping": self.is_looping,
             "active_tool": self.active_tool,
             "alerts_count": self.alerts_count,
+            "uptime_sec": round(self.uptime_sec, 2),
+            "lines_per_min": round(self.lines_per_min, 2),
+            "tokens_saved_estimate": self.tokens_saved_estimate,
+            "dollars_saved_estimate": round(self.dollars_saved_estimate, 4),
         }
 
 
@@ -75,17 +83,21 @@ class TranscriptWatchdog:
         stall_threshold_sec: float = 30.0,
         loop_threshold: int = 3,
         detector: Optional[MilestoneDetector] = None,
+        report_interval_sec: float = 60.0,
     ) -> None:
         self.transcript_path = Path(transcript_path) if transcript_path else None
         self.poll_interval = max(0.01, poll_interval)
         self.stall_threshold_sec = max(0.01, stall_threshold_sec)
         self.loop_threshold = max(2, loop_threshold)
         self.detector = detector or MilestoneDetector()
+        self.report_interval_sec = max(0.01, report_interval_sec)
 
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
 
+        self._start_ts: float = time.time()
+        self._last_report_ts: float = time.time()
         self._file_offset: int = 0
         self._line_buffer: str = ""
         self._lines_read: int = 0
@@ -97,6 +109,8 @@ class TranscriptWatchdog:
         self._is_looping: bool = False
         self._active_tool: Optional[str] = None
         self._active_tool_start_ts: Optional[float] = None
+        self._tokens_saved_estimate: int = 0
+        self._dollars_saved_estimate: float = 0.0
 
         # Signatures of recent tool calls to detect exact repeats and cycling
         self._recent_signatures: Deque[str] = deque(maxlen=20)
@@ -104,6 +118,7 @@ class TranscriptWatchdog:
         self._alert_callbacks: List[Callable[[WatchdogAlert], None]] = []
         self._telemetry_callbacks: List[Callable[[WatchdogTelemetry], None]] = []
         self._completion_callbacks: List[Callable[[MilestoneEvent], None]] = []
+        self._periodic_report_callbacks: List[Callable[[WatchdogTelemetry], None]] = []
 
         # Wire milestone detector for completion and delivery events
         self.detector.on_milestone(self._handle_milestone_completion)
@@ -134,6 +149,11 @@ class TranscriptWatchdog:
         with self._lock:
             self._completion_callbacks.append(callback)
 
+    def on_periodic_report(self, callback: Callable[[WatchdogTelemetry], None]) -> None:
+        """Register a callback for periodic comprehensive telemetry reports (default: every 60s)."""
+        with self._lock:
+            self._periodic_report_callbacks.append(callback)
+
     def start(self) -> None:
         """Start the watchdog background thread."""
         with self._lock:
@@ -163,7 +183,10 @@ class TranscriptWatchdog:
 
     def get_telemetry(self) -> WatchdogTelemetry:
         """Return a snapshot of current telemetry data."""
+        now = time.time()
         with self._lock:
+            uptime = max(0.001, now - self._start_ts)
+            lpm = (self._lines_read / uptime) * 60.0
             return WatchdogTelemetry(
                 lines_read=self._lines_read,
                 bytes_read=self._bytes_read,
@@ -174,6 +197,10 @@ class TranscriptWatchdog:
                 is_looping=self._is_looping,
                 active_tool=self._active_tool,
                 alerts_count=len(self._alerts),
+                uptime_sec=uptime,
+                lines_per_min=lpm,
+                tokens_saved_estimate=self._tokens_saved_estimate,
+                dollars_saved_estimate=self._dollars_saved_estimate,
             )
 
     def get_alerts(self) -> List[WatchdogAlert]:
@@ -213,9 +240,10 @@ class TranscriptWatchdog:
         self.detector.scan_transcript_entry(entry)
 
     def check_health(self) -> WatchdogTelemetry:
-        """Evaluate stall status and emit alerts if stalled."""
+        """Evaluate stall status and emit alerts if stalled, plus periodic telemetry reporting."""
         now = time.time()
         alert_to_emit: Optional[WatchdogAlert] = None
+        should_emit_report = False
 
         with self._lock:
             idle_time = now - self._last_activity_ts
@@ -238,11 +266,19 @@ class TranscriptWatchdog:
             else:
                 self._is_stalled = False
 
+            if now - self._last_report_ts >= self.report_interval_sec:
+                should_emit_report = True
+                self._last_report_ts = now
+
         if alert_to_emit:
             self._notify_alert(alert_to_emit)
 
         telem = self.get_telemetry()
         self._notify_telemetry(telem)
+
+        if should_emit_report:
+            self._notify_periodic_report(telem)
+
         return telem
 
     def step(self) -> int:
@@ -347,6 +383,8 @@ class TranscriptWatchdog:
             # Check repeat deadlock
             if self._consecutive_repeats >= self.loop_threshold:
                 self._is_looping = True
+                self._tokens_saved_estimate += 2500
+                self._dollars_saved_estimate += (2500 / 1_000_000.0) * 15.0
                 alert_to_emit = WatchdogAlert(
                     alert_type="LOOP_DEADLOCK",
                     timestamp=time.time(),
@@ -379,6 +417,15 @@ class TranscriptWatchdog:
     def _notify_telemetry(self, telem: WatchdogTelemetry) -> None:
         with self._lock:
             callbacks = list(self._telemetry_callbacks)
+        for cb in callbacks:
+            try:
+                cb(telem)
+            except Exception:
+                pass
+
+    def _notify_periodic_report(self, telem: WatchdogTelemetry) -> None:
+        with self._lock:
+            callbacks = list(self._periodic_report_callbacks)
         for cb in callbacks:
             try:
                 cb(telem)

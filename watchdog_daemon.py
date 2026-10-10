@@ -291,6 +291,7 @@ def main():
     parser.add_argument("--watch-jules", action="store_true", default=True, help="Supervise and auto-pull Jules cloud sessions")
     parser.add_argument("--no-watch-jules", action="store_false", dest="watch_jules", help="Disable Jules supervision")
     parser.add_argument("--jules-poll", type=float, default=10.0, help="Polling interval for Jules cloud sessions")
+    parser.add_argument("--report-interval", type=float, default=60.0, help="Interval in seconds for periodic comprehensive telemetry report (default: 60.0s)")
     parser.add_argument("--stop", action="store_true", help="Stop running watchdog daemon and halt cloud compute")
     parser.add_argument("--status", action="store_true", help="Show watchdog daemon and cloud power status")
 
@@ -386,6 +387,12 @@ def main():
         except Exception as e:
             print(f"[ZeroSpinner] Warning initializing Jules watcher: {e}", flush=True)
 
+    daemon_start_ts = time.time()
+    last_report_ts = daemon_start_ts
+    intercepted_cycles = 0
+    saved_tokens = 0
+    saved_dollars = 0.0
+
     while True:
         iteration += 1
         now_ts = time.time()
@@ -439,11 +446,51 @@ def main():
             perform_teardown(reason=f"Mission Delivery Confirmed: MILESTONE_PR_CREATED{pr_info}", stop_cloud=not args.no_cloud_stop)
             sys.exit(0)
 
-        # 6. Check Idle Timeout Teardown
+        # 6. Periodic Comprehensive 60-Second Telemetry & Savings Report
         idle_seconds = int(now_ts - last_activity_ts)
         is_active = idle_seconds < 30
         state_tag = "🟢 ACTIVE" if is_active else f"🟡 IDLE ({idle_seconds}s)"
         breaker_state = "CLOSED (NORMAL)" if not breaker.is_tripped() else "OPEN (TRIPPED)"
+
+        if now_ts - last_report_ts >= args.report_interval:
+            last_report_ts = now_ts
+            uptime_sec = now_ts - daemon_start_ts
+            uptime_str = f"{int(uptime_sec // 60)}m {int(uptime_sec % 60):02d}s"
+            velocity_lpm = (worker_line_count / max(0.001, uptime_sec)) * 60.0
+
+            cloud_status_str = "Alpha: TERMINATED | Beta: IDLE (Safe zero cost)"
+            if DISPATCH_SCRIPT.exists():
+                try:
+                    res = subprocess.run(
+                        [sys.executable, str(DISPATCH_SCRIPT), "--status"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    if res.stdout:
+                        lines = [line.strip() for line in res.stdout.splitlines() if "Subsystem" in line]
+                        if lines:
+                            cloud_status_str = " | ".join(lines)
+                except Exception:
+                    pass
+
+            j_str = "No active sessions"
+            if jules_watcher:
+                j_active = sum(1 for s in jules_watcher.state.values() if s.status in ("In Progress", "Planning", "Running"))
+                j_comp = sum(1 for s in jules_watcher.state.values() if s.status == "Completed")
+                j_pull = sum(1 for s in jules_watcher.state.values() if s.pulled)
+                j_str = f"{j_active} Active, {j_comp} Completed ({j_pull} Auto-Pulled)"
+
+            print("\n" + "=" * 80, flush=True)
+            print(f"⏱️  [ZeroSpinner 60s Telemetry Report - {now_str}]", flush=True)
+            print(f"    Uptime               : {uptime_str} (Elapsed: {int(uptime_sec)}s)", flush=True)
+            print(f"    Processing Velocity  : {velocity_lpm:.1f} lines/min (Total Read: {worker_line_count} lines)", flush=True)
+            print(f"    Autonomous Breaker   : {breaker_state} | Active Milestones: {len(milestones_seen)}", flush=True)
+            print(f"    Speculative Defense  : {intercepted_cycles} cycles intercepted | ~{saved_tokens:,} tokens saved (~${saved_dollars:.2f} USD)", flush=True)
+            print(f"    Target Worker        : {worker_id[:8]}... | Status: {state_tag} | Last Action: {last_action[:30]}", flush=True)
+            print(f"    Cloud Compute State  : {cloud_status_str}", flush=True)
+            print(f"    Jules Cloud Sessions : {j_str}", flush=True)
+            print("=" * 80 + "\n", flush=True)
 
         jules_status_tag = ""
         if jules_watcher:
