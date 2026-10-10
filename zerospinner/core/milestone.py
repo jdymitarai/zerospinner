@@ -90,6 +90,8 @@ class MilestoneDetector:
             MILESTONE_PR_CREATED: [
                 # gh pr create output: returns solitary URL on its own line
                 re.compile(r"^\s*https?://github\.com/([\w\.-]+)/([\w\.-]+)/pull/(\d+)\s*$", re.MULTILINE | re.IGNORECASE),
+                # GH PR embedded in text (e.g. Created PR: https://github.com...)
+                re.compile(r"https?://github\.com/([\w\.-]+)/([\w\.-]+)/pull/(\d+)", re.IGNORECASE),
                 # GitLab MR output: returns solitary MR URL on its own line
                 re.compile(r"^\s*https?://gitlab\.com/([\w\.-]+)/([\w\.-]+)/-/merge_requests/(\d+)\s*$", re.MULTILINE | re.IGNORECASE),
                 # gh pr create output: "Created pull request #42 (title)"

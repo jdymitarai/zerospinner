@@ -139,65 +139,140 @@ def get_service() -> ZeroSpinnerMCPService:
 
 def handle_watch_session(transcript_path: str, poll_interval: float = 2.0) -> str:
     """Tool handler: zerospinner_watch_session."""
-    result = _SERVICE.watch_session(transcript_path, poll_interval)
-    return json.dumps(result, indent=2)
+    try:
+        result = _SERVICE.watch_session(transcript_path, poll_interval)
+        return json.dumps(result)
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
 
 
 def handle_emit_milestone(type: str, payload: str = "", source: str = "mcp_tool") -> str:
     """Tool handler: zerospinner_emit_milestone."""
-    result = _SERVICE.emit_milestone(milestone_type=type, payload=payload, source=source)
-    return json.dumps(result, indent=2)
+    try:
+        result = _SERVICE.emit_milestone(milestone_type=type, payload=payload, source=source)
+        return json.dumps(result)
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
 
 
 def handle_status() -> str:
     """Tool handler: zerospinner_status."""
-    result = _SERVICE.status()
-    return json.dumps(result, indent=2)
+    try:
+        result = _SERVICE.status()
+        return json.dumps(result)
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
 
 
 def handle_trip_breaker(reason: str = "MANUAL_OVERRIDE") -> str:
     """Tool handler: zerospinner_trip_breaker."""
-    result = _SERVICE.trip_breaker(reason=reason, details="Operator requested immediate stop and delivery.")
-    return json.dumps(result, indent=2)
+    try:
+        result = _SERVICE.trip_breaker(reason=reason, details="Operator requested immediate stop and delivery.")
+        return json.dumps(result)
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
 
 
 def handle_teardown(stop_cloud: bool = True, reason: str = "Teardown requested") -> str:
     """Tool handler: zerospinner_teardown."""
-    result = _SERVICE.teardown(stop_cloud=stop_cloud, reason=reason)
-    return json.dumps(result, indent=2)
+    try:
+        result = _SERVICE.teardown(stop_cloud=stop_cloud, reason=reason)
+        return json.dumps(result)
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
 
 
 def create_mcp_server():
     """Create FastMCP server instance if mcp library is available."""
     try:
-        from mcp.server.fastmcp import FastMCP
+        try:
+            from mcp.server.fastmcp import FastMCP
+            mcp = FastMCP("ZeroSpinner", dependencies=["zerospinner", "rich"])
+        except ModuleNotFoundError:
+            # For mcp 2.x
+            from mcp.server.mcpserver import MCPServer
+            mcp = MCPServer("ZeroSpinner", dependencies=["zerospinner", "rich"])
 
-        mcp = FastMCP("ZeroSpinner", dependencies=["zerospinner", "rich"])
+        try:
+            from mcp.types import ToolAnnotations
+            annotations_status = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
+            annotations_watch = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
+            annotations_emit = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
+            annotations_trip = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
+            annotations_teardown = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
 
-        @mcp.tool()
-        def zerospinner_watch_session(transcript_path: str, poll_interval: float = 2.0) -> str:
-            """Attach ZeroSpinner watchdog to an active agent transcript file to monitor stalls and loops."""
-            return handle_watch_session(transcript_path, poll_interval)
+            # Using new MCP 2.x API with annotations object
+            @mcp.tool(annotations=annotations_watch)
+            def zerospinner_watch_session(transcript_path: str, poll_interval: float = 2.0) -> str:
+                """Attach ZeroSpinner watchdog to an active agent transcript file to monitor stalls and loops.
+                Hints: readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
+                """
+                return handle_watch_session(transcript_path, poll_interval)
 
-        @mcp.tool()
-        def zerospinner_emit_milestone(type: str, payload: str = "", source: str = "agent") -> str:
-            """Preemptively emit a milestone (e.g. MILESTONE_TESTS_PASSED, MILESTONE_PR_CREATED) to trigger fast delivery."""
-            return handle_emit_milestone(type, payload, source)
+            @mcp.tool(annotations=annotations_emit)
+            def zerospinner_emit_milestone(type: str, payload: str = "", source: str = "agent") -> str:
+                """Preemptively emit a milestone (e.g. MILESTONE_TESTS_PASSED, MILESTONE_PR_CREATED) to trigger fast delivery.
+                Hints: readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
+                """
+                return handle_emit_milestone(type, payload, source)
 
-        @mcp.tool()
-        def zerospinner_status() -> str:
-            """Query real-time ZeroSpinner status: circuit breaker state, telemetry, and subagent hierarchy."""
-            return handle_status()
+            @mcp.tool(annotations=annotations_status)
+            def zerospinner_status() -> str:
+                """Query real-time ZeroSpinner status: circuit breaker state, telemetry, and subagent hierarchy.
+                Hints: readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+                """
+                return handle_status()
 
-        @mcp.tool()
-        def zerospinner_trip_breaker(reason: str = "MANUAL_OVERRIDE") -> str:
-            """Immediately trip the circuit breaker, stopping infinite spinner and speculative subagent loops."""
-            return handle_trip_breaker(reason)
+            @mcp.tool(annotations=annotations_trip)
+            def zerospinner_trip_breaker(reason: str = "MANUAL_OVERRIDE") -> str:
+                """Immediately trip the circuit breaker, stopping infinite spinner and speculative subagent loops.
+                Hints: readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+                """
+                return handle_trip_breaker(reason)
 
-        @mcp.tool()
-        def zerospinner_teardown(stop_cloud: bool = True, reason: str = "Teardown requested") -> str:
-            """Tear down all background processes, release cloud compute resources, and clean up completely."""
-            return handle_teardown(stop_cloud=stop_cloud, reason=reason)
+            @mcp.tool(annotations=annotations_teardown)
+            def zerospinner_teardown(stop_cloud: bool = True, reason: str = "Teardown requested") -> str:
+                """Tear down all background processes, release cloud compute resources, and clean up completely.
+                Hints: readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+                """
+                return handle_teardown(stop_cloud=stop_cloud, reason=reason)
+
+        except (ImportError, TypeError):
+            # Fallback for MCP 1.x which accepted kwargs directly
+            @mcp.tool(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+            def zerospinner_watch_session(transcript_path: str, poll_interval: float = 2.0) -> str:
+                """Attach ZeroSpinner watchdog to an active agent transcript file to monitor stalls and loops.
+                Hints: readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
+                """
+                return handle_watch_session(transcript_path, poll_interval)
+
+            @mcp.tool(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+            def zerospinner_emit_milestone(type: str, payload: str = "", source: str = "agent") -> str:
+                """Preemptively emit a milestone (e.g. MILESTONE_TESTS_PASSED, MILESTONE_PR_CREATED) to trigger fast delivery.
+                Hints: readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
+                """
+                return handle_emit_milestone(type, payload, source)
+
+            @mcp.tool(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+            def zerospinner_status() -> str:
+                """Query real-time ZeroSpinner status: circuit breaker state, telemetry, and subagent hierarchy.
+                Hints: readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+                """
+                return handle_status()
+
+            @mcp.tool(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+            def zerospinner_trip_breaker(reason: str = "MANUAL_OVERRIDE") -> str:
+                """Immediately trip the circuit breaker, stopping infinite spinner and speculative subagent loops.
+                Hints: readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+                """
+                return handle_trip_breaker(reason)
+
+            @mcp.tool(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+            def zerospinner_teardown(stop_cloud: bool = True, reason: str = "Teardown requested") -> str:
+                """Tear down all background processes, release cloud compute resources, and clean up completely.
+                Hints: readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+                """
+                return handle_teardown(stop_cloud=stop_cloud, reason=reason)
 
         return mcp
     except ImportError:
