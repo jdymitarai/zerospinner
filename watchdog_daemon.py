@@ -152,7 +152,14 @@ def perform_teardown(reason: str = "Mission Complete", stop_cloud: bool = True) 
         except Exception:
             pass
 
-    # 3. Cleanup PID and Stop Flag files
+    # 3. Stop Jules Watchdog if running
+    try:
+        from zerospinner.jules_watchdog import stop_daemon as stop_jules_daemon
+        stop_jules_daemon()
+    except Exception:
+        pass
+
+    # 4. Cleanup PID and Stop Flag files
     if PID_FILE.exists():
         try:
             PID_FILE.unlink(missing_ok=True)
@@ -256,6 +263,17 @@ def cmd_status() -> int:
         except Exception as e:
             print(f"2. Cloud Status Query Error: {e}", flush=True)
 
+    # Query Jules Cloud Sessions Status
+    try:
+        from zerospinner.jules_watchdog import JulesWatchdog
+        dog = JulesWatchdog()
+        completed = sum(1 for s in dog.state.values() if s.status == "Completed")
+        active = sum(1 for s in dog.state.values() if s.status in ("In Progress", "Planning", "Running"))
+        pulled = sum(1 for s in dog.state.values() if s.pulled)
+        print(f"3. Jules Cloud Sessions    : {active} Active | {completed} Completed ({pulled} Auto-Pulled)", flush=True)
+    except Exception as e:
+        print(f"3. Jules Status Query Error: {e}", flush=True)
+
     print("=" * 80 + "\n", flush=True)
     return 0
 
@@ -270,6 +288,9 @@ def main():
     parser.add_argument("--auto-teardown", action="store_true", default=True, help="Auto teardown on completion")
     parser.add_argument("--no-auto-teardown", action="store_false", dest="auto_teardown", help="Disable auto teardown")
     parser.add_argument("--no-cloud-stop", action="store_true", help="Skip cloud compute teardown")
+    parser.add_argument("--watch-jules", action="store_true", default=True, help="Supervise and auto-pull Jules cloud sessions")
+    parser.add_argument("--no-watch-jules", action="store_false", dest="watch_jules", help="Disable Jules supervision")
+    parser.add_argument("--jules-poll", type=float, default=10.0, help="Polling interval for Jules cloud sessions")
     parser.add_argument("--stop", action="store_true", help="Stop running watchdog daemon and halt cloud compute")
     parser.add_argument("--status", action="store_true", help="Show watchdog daemon and cloud power status")
 
@@ -354,6 +375,17 @@ def main():
         except Exception:
             pass
 
+    # Initialize Jules Watcher
+    jules_watcher = None
+    last_jules_poll = 0.0
+    if args.watch_jules:
+        try:
+            from zerospinner.jules_watchdog import JulesWatchdog
+            jules_watcher = JulesWatchdog(poll_interval=args.jules_poll)
+            print("[ZeroSpinner] 🐾 Google Jules Cloud Session Auto-Pull Watcher Active.", flush=True)
+        except Exception as e:
+            print(f"[ZeroSpinner] Warning initializing Jules watcher: {e}", flush=True)
+
     while True:
         iteration += 1
         now_ts = time.time()
@@ -365,7 +397,19 @@ def main():
             perform_teardown(reason="External Stop Signal File Detected", stop_cloud=not args.no_cloud_stop)
             sys.exit(0)
 
-        # 2. Check Worker Transcript Updates
+        # 2. Check Jules Cloud Sessions and Auto-Pull
+        if jules_watcher and (now_ts - last_jules_poll >= args.jules_poll):
+            last_jules_poll = now_ts
+            try:
+                newly_pulled = jules_watcher.check_once()
+                if newly_pulled:
+                    for np in newly_pulled:
+                        print(f"\n[ZeroSpinner] 🎯 Jules Session Auto-Pulled: #{np.session_id} ({np.repo} #{np.issue_number})", flush=True)
+                        print(f"              Patch: {np.patch_path} | Score: {np.surgical_score} | Verdict: {np.audit_verdict}", flush=True)
+            except Exception:
+                pass
+
+        # 3. Check Worker Transcript Updates
         has_new_activity = False
         new_worker_lines, worker_offset = read_transcript_tail(worker_transcript, worker_offset)
         if new_worker_lines:
@@ -376,7 +420,7 @@ def main():
                 last_action = parse_action_from_line(raw_line)
                 detector.scan_line(raw_line, source="worker_transcript")
 
-        # 3. Check Main Conversation Transcript Updates (PRs created by coordinator)
+        # 4. Check Main Conversation Transcript Updates (PRs created by coordinator)
         new_main_lines, main_offset = read_transcript_tail(main_transcript, main_offset)
         if new_main_lines:
             has_new_activity = True
@@ -384,7 +428,7 @@ def main():
             for raw_line in new_main_lines:
                 detector.scan_line(raw_line, source="main_transcript")
 
-        # 4. Check Delivery Milestones & Trigger Auto-Teardown
+        # 5. Check Delivery Milestones & Trigger Auto-Teardown
         pr_milestone = detector.has_milestone(MILESTONE_PR_CREATED)
         if pr_milestone and args.auto_teardown:
             latest_pr = next((m for m in reversed(milestones_seen) if m.milestone_type == MILESTONE_PR_CREATED), None)
@@ -395,11 +439,18 @@ def main():
             perform_teardown(reason=f"Mission Delivery Confirmed: MILESTONE_PR_CREATED{pr_info}", stop_cloud=not args.no_cloud_stop)
             sys.exit(0)
 
-        # 5. Check Idle Timeout Teardown
+        # 6. Check Idle Timeout Teardown
         idle_seconds = int(now_ts - last_activity_ts)
         is_active = idle_seconds < 30
         state_tag = "🟢 ACTIVE" if is_active else f"🟡 IDLE ({idle_seconds}s)"
         breaker_state = "CLOSED (NORMAL)" if not breaker.is_tripped() else "OPEN (TRIPPED)"
+
+        jules_status_tag = ""
+        if jules_watcher:
+            j_active = sum(1 for s in jules_watcher.state.values() if s.status in ("In Progress", "Planning", "Running"))
+            j_pulled = sum(1 for s in jules_watcher.state.values() if s.pulled)
+            j_comp = sum(1 for s in jules_watcher.state.values() if s.status == "Completed")
+            jules_status_tag = f" | Jules: {j_active} active, {j_pulled}/{j_comp} pulled"
 
         action_display = f" | Action: {last_action[:35]}" if last_action else ""
         print(
@@ -407,7 +458,7 @@ def main():
             f"Worker: {worker_id[:8]}... | "
             f"Lines: {worker_line_count} | "
             f"Status: {state_tag} | "
-            f"Breaker: {breaker_state}{action_display}",
+            f"Breaker: {breaker_state}{action_display}{jules_status_tag}",
             flush=True,
         )
 

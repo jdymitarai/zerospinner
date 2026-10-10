@@ -88,12 +88,12 @@ class MilestoneDetector:
                 re.compile(r"^OK(?:\s*\(skipped=\d+\))?$", re.MULTILINE),
             ],
             MILESTONE_PR_CREATED: [
-                # GitHub PR URLs: https://github.com/owner/repo/pull/123
-                re.compile(r"https?://github\.com/([\w\.-]+)/([\w\.-]+)/pull/(\d+)", re.IGNORECASE),
-                # GitLab MR URLs: https://gitlab.com/owner/repo/-/merge_requests/123
-                re.compile(r"https?://gitlab\.com/([\w\.-]+)/([\w\.-]+)/-/merge_requests/(\d+)", re.IGNORECASE),
+                # gh pr create output: returns solitary URL on its own line
+                re.compile(r"^\s*https?://github\.com/([\w\.-]+)/([\w\.-]+)/pull/(\d+)\s*$", re.MULTILINE | re.IGNORECASE),
+                # GitLab MR output: returns solitary MR URL on its own line
+                re.compile(r"^\s*https?://gitlab\.com/([\w\.-]+)/([\w\.-]+)/-/merge_requests/(\d+)\s*$", re.MULTILINE | re.IGNORECASE),
                 # gh pr create output: "Created pull request #42 (title)"
-                re.compile(r"(?:created|opened)\s+pull\s+request\s+#?(\d+)", re.IGNORECASE),
+                re.compile(r"(?:created|opened)\s+(?:new\s+)?pull\s+request\s+#?(\d+)", re.IGNORECASE),
             ],
             MILESTONE_BUILD_SUCCESS: [
                 # Gradle: BUILD SUCCESSFUL in 2s
