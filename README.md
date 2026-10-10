@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Tests Passing](https://img.shields.io/badge/tests-45%20passed%20%7C%20100%25-brightgreen)](https://github.com/jdymitarai/zerospinner)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Standard%20Ready-purple)](https://modelcontextprotocol.io/)
-[![M8ven Score](https://m8ven.ai/badge/mcp/jdymitarai-zerospinner-tf866w?v=6debe8f117618596ae12f8014c002960)](https://m8ven.ai/mcp/jdymitarai-zerospinner-tf866w?s=readme)
+[![M8ven Score](https://m8ven.ai/badge/mcp/jdymitarai-zerospinner-tf866w?v=855eb22c3b436b326111d4c43fc0d786)](https://m8ven.ai/mcp/jdymitarai-zerospinner-tf866w?s=readme)
 
 > **The Preemptive Kernel & Circuit Breaker for Autonomous AI Agents.**  
 > *Eliminate the infinite spinner. Intercept recursive over-refinement. Deliver the second milestones pass.*
