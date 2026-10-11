@@ -12,6 +12,7 @@ from zerospinner.mcp.server import (
     handle_status,
     handle_trip_breaker,
     handle_watch_session,
+    handle_teardown,
 )
 
 
@@ -47,23 +48,40 @@ def test_mcp_service_operations(temp_transcript: Path):
     service.watchdog.stop()
 
 
-def test_mcp_handlers(temp_transcript: Path):
-    # Test json string output of top-level handler functions
-    raw_watch = handle_watch_session(str(temp_transcript))
-    parsed_watch = json.loads(raw_watch)
-    assert parsed_watch["status"] == "watching"
+def test_zerospinner_watch_session(temp_transcript: Path):
+    raw = handle_watch_session(str(temp_transcript))
+    parsed = json.loads(raw)
+    assert parsed["status"] == "watching"
+    assert parsed["transcript_path"] == str(temp_transcript)
 
-    raw_emit = handle_emit_milestone(MILESTONE_PR_CREATED, "https://github.com/org/repo/pull/1")
-    parsed_emit = json.loads(raw_emit)
-    assert parsed_emit["status"] == "emitted"
 
-    raw_status = handle_status()
-    parsed_status = json.loads(raw_status)
-    assert "breaker" in parsed_status
+def test_zerospinner_emit_milestone():
+    raw = handle_emit_milestone(MILESTONE_PR_CREATED, "https://github.com/org/repo/pull/1")
+    parsed = json.loads(raw)
+    assert parsed["status"] == "emitted"
+    assert "milestone" in parsed
 
-    raw_trip = handle_trip_breaker("MANUAL_DEMO")
-    parsed_trip = json.loads(raw_trip)
-    assert parsed_trip["status"] == "tripped"
+
+def test_zerospinner_status():
+    raw = handle_status()
+    parsed = json.loads(raw)
+    assert "breaker" in parsed
+    assert "active_milestones" in parsed
+    assert "is_tripped" in parsed
+
+
+def test_zerospinner_trip_breaker():
+    raw = handle_trip_breaker("MANUAL_DEMO")
+    parsed = json.loads(raw)
+    assert parsed["status"] == "tripped"
+    assert parsed["trip_reason"] == "MANUAL_DEMO"
+
+
+def test_zerospinner_teardown():
+    raw = handle_teardown(stop_cloud=False, reason="Test teardown")
+    parsed = json.loads(raw)
+    assert parsed["status"] == "teardown_complete"
+    assert parsed["reason"] == "Test teardown"
 
 
 def test_fastmcp_registration():
